@@ -1,0 +1,68 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from urllib.parse import urljoin
+import os
+import re
+
+# URL of the website
+base_url = "https://books.toscrape.com/"
+current_url = base_url
+
+# Directory for storing PDFs
+pdf_dir = "pdf_downloads"
+os.makedirs(pdf_dir, exist_ok=True)
+
+# List to store book data
+books_data = []
+
+# Sanitize title for use as filename
+def sanitize_filename(title):
+    return re.sub(r'[\\/*?:"<>|]', "", title)
+
+# Function to extract book data and download PDFs
+def extract_books(soup):
+    for book in soup.find_all('article', class_='product_pod'):
+        title = book.h3.a['title']
+        price = book.find('p', class_='price_color').text
+        in_stock = book.find('p', class_='instock availability').text.strip()
+        relative_url = book.h3.a['href']
+        book_url = urljoin(current_url, relative_url)
+        books_data.append([title, price, in_stock])
+        download_pdf(book_url, title)
+
+# Function to download PDF
+def download_pdf(url, title):
+    try:
+        pdf_response = requests.get(url)
+        pdf_response.raise_for_status()  # Check if the request was successful
+        sanitized_title = sanitize_filename(title)
+        pdf_filename = os.path.join(pdf_dir, f"{sanitized_title}.pdf")
+        with open(pdf_filename, 'wb') as f:
+            f.write(pdf_response.content)
+        print(f"Downloaded: {sanitized_title}")
+    except requests.RequestException as e:
+        print(f"Error downloading {title}: {e}")
+
+# Loop through all pages
+while True:
+    try:
+        response = requests.get(current_url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        extract_books(soup)
+        next_button = soup.find('li', class_='next')
+        if next_button:
+            next_page_url = next_button.a['href']
+            current_url = urljoin(current_url, next_page_url)
+        else:
+            break
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        break
+
+# Creating a DataFrame and saving to Excel
+try:
+    df = pd.DataFrame(books_data, columns=['Title', 'Price', 'Availability'])
+    df.to_excel('books_data.xlsx', index=False)
+except Exception as e:
+    print(f"Failed to save Excel file: {e}")
